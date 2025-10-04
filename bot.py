@@ -1,24 +1,30 @@
 import os
-import socket
-
-# -------------------------
-# Dummy port binding first (for Render)
-# -------------------------
-port = int(os.environ.get("PORT", 10000))
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.bind(('', port))
-s.listen(1)
-print(f"🟢 Bound to port {port} (dummy server to satisfy Render)")
-
-# -------------------------
-# Now import other modules and start bot
-# -------------------------
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 import praw
 import time
 import re
 
 # -------------------------
-# Load credentials from environment variables
+# Tiny HTTP server (required by Render)
+# -------------------------
+class DummyHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Reddit bot running!")
+
+def start_http_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(('0.0.0.0', port), DummyHandler)
+    print(f"🟢 Dummy HTTP server running on port {port}")
+    server.serve_forever()
+
+# Start the HTTP server in a separate thread
+threading.Thread(target=start_http_server, daemon=True).start()
+
+# -------------------------
+# Reddit bot setup
 # -------------------------
 reddit = praw.Reddit(
     client_id=os.environ["REDDIT_CLIENT_ID"],
@@ -51,20 +57,16 @@ def load_faq():
     return faq
 
 # -------------------------
-# Initial load of FAQ
+# Initial FAQ load
 # -------------------------
 faq_answers = load_faq()
 print(f"Loaded {len(faq_answers)} FAQ entries from wiki.")
 
 # -------------------------
-# Auto-refresh variables
+# Bot loop variables
 # -------------------------
 last_reload = time.time()
 reload_interval = 300  # seconds
-
-# -------------------------
-# Track comments already replied to
-# -------------------------
 replied_comments = set()
 
 # -------------------------
@@ -77,7 +79,7 @@ for comment in subreddit.stream.comments(skip_existing=True):
         last_reload = time.time()
         print(f"🔄 Reloaded FAQ from wiki ({len(faq_answers)} entries)")
 
-    # Skip if already replied
+    # Skip already replied comments
     if comment.id in replied_comments:
         continue
 
