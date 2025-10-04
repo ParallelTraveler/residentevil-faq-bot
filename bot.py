@@ -1,8 +1,21 @@
 import os
+import socket
+
+# -------------------------
+# Dummy port binding first (for Render)
+# -------------------------
+port = int(os.environ.get("PORT", 10000))
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.bind(('', port))
+s.listen(1)
+print(f"🟢 Bound to port {port} (dummy server to satisfy Render)")
+
+# -------------------------
+# Now import other modules and start bot
+# -------------------------
 import praw
 import time
 import re
-import socket  # added for dummy port
 
 # -------------------------
 # Load credentials from environment variables
@@ -25,7 +38,6 @@ print(f"Monitoring subreddit: r/{subreddit_name}")
 # Function to load FAQ from wiki
 # -------------------------
 def load_faq():
-    """Fetch FAQ from subreddit wiki and return as a dict {code: answer}."""
     try:
         page = subreddit.wiki["faq"].content_md
     except Exception as e:
@@ -33,7 +45,6 @@ def load_faq():
         return {}
     
     faq = {}
-    # Match [FAQ###] followed by the answer text
     matches = re.findall(r"(\[FAQ\d+\])\s*\n(.+?)(?=\n\[FAQ|\Z)", page, re.S)
     for code, answer in matches:
         faq[code.strip()] = answer.strip()
@@ -49,7 +60,7 @@ print(f"Loaded {len(faq_answers)} FAQ entries from wiki.")
 # Auto-refresh variables
 # -------------------------
 last_reload = time.time()
-reload_interval = 300  # seconds (5 minutes)
+reload_interval = 300  # seconds
 
 # -------------------------
 # Track comments already replied to
@@ -81,13 +92,4 @@ for comment in subreddit.stream.comments(skip_existing=True):
                 print(f"⚠️ Error replying: {e}")
             break
 
-    time.sleep(2)  # prevent spamming too fast
-
-# -------------------------
-# Dummy port binding for Render
-# -------------------------
-port = int(os.environ.get("PORT", 10000))
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.bind(('', port))
-s.listen(1)
-print(f"🟢 Bound to port {port} (dummy server to satisfy Render)")
+    time.sleep(2)
