@@ -2,6 +2,7 @@ import os
 import praw
 import time
 import re
+import socket  # added for dummy port
 
 # -------------------------
 # Load credentials from environment variables
@@ -48,7 +49,7 @@ print(f"Loaded {len(faq_answers)} FAQ entries from wiki.")
 # Auto-refresh variables
 # -------------------------
 last_reload = time.time()
-reload_interval = 600  # seconds (10 minutes)
+reload_interval = 300  # seconds (5 minutes)
 
 # -------------------------
 # Track comments already replied to
@@ -81,3 +82,12 @@ for comment in subreddit.stream.comments(skip_existing=True):
             break
 
     time.sleep(2)  # prevent spamming too fast
+
+# -------------------------
+# Dummy port binding for Render
+# -------------------------
+port = int(os.environ.get("PORT", 10000))
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.bind(('', port))
+s.listen(1)
+print(f"🟢 Bound to port {port} (dummy server to satisfy Render)")
