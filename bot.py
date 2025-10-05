@@ -1,9 +1,19 @@
+print("🔍 Checking environment variables...")
+
 import os
+print("✅ os imported")
+
 import threading
+print("✅ threading imported")
+
 from http.server import HTTPServer, BaseHTTPRequestHandler
+print("✅ HTTP server imported")
+
 import praw
-import time
-import re
+print("✅ praw imported")
+
+import time, re
+print("✅ time and re imported")
 
 # -------------------------
 # Tiny HTTP server (required by Render)
@@ -24,34 +34,30 @@ def start_http_server():
 threading.Thread(target=start_http_server, daemon=True).start()
 
 # -------------------------
-# Check environment variables
-# -------------------------
-print("🔍 Checking environment variables...")
-required_vars = [
-    "REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET", "REDDIT_USERNAME",
-    "REDDIT_PASSWORD", "REDDIT_USER_AGENT", "SUBREDDIT"
-]
-
-for var in required_vars:
-    if os.environ.get(var) is None:
-        print(f"❌ Missing environment variable: {var}")
-    else:
-        print(f"✅ Found: {var}")
-
-# -------------------------
 # Reddit bot setup
 # -------------------------
-reddit = praw.Reddit(
-    client_id=os.environ["REDDIT_CLIENT_ID"],
-    client_secret=os.environ["REDDIT_CLIENT_SECRET"],
-    username=os.environ["REDDIT_USERNAME"],
-    password=os.environ["REDDIT_PASSWORD"],
-    user_agent=os.environ["REDDIT_USER_AGENT"]
-)
+print("🚀 Setting up Reddit connection...")
 
-subreddit_name = os.environ["SUBREDDIT"]
+try:
+    reddit = praw.Reddit(
+        client_id=os.environ["REDDIT_CLIENT_ID"],
+        client_secret=os.environ["REDDIT_CLIENT_SECRET"],
+        username=os.environ["REDDIT_USERNAME"],
+        password=os.environ["REDDIT_PASSWORD"],
+        user_agent=os.environ["REDDIT_USER_AGENT"]
+    )
+    print("✅ Reddit instance created")
+except Exception as e:
+    print(f"❌ Failed to create Reddit instance: {e}")
+    raise
+
+subreddit_name = os.environ.get("SUBREDDIT", "").strip()
+if not subreddit_name:
+    print("❌ SUBREDDIT environment variable is missing!")
+else:
+    print(f"📋 Target subreddit: r/{subreddit_name}")
+
 subreddit = reddit.subreddit(subreddit_name)
-
 print(f"✅ Logged in as: {reddit.user.me()}")
 print(f"Monitoring subreddit: r/{subreddit_name}")
 
@@ -59,6 +65,7 @@ print(f"Monitoring subreddit: r/{subreddit_name}")
 # Function to load FAQ from wiki
 # -------------------------
 def load_faq():
+    print("📖 Loading FAQ from subreddit wiki...")
     try:
         page = subreddit.wiki["faq"].content_md
     except Exception as e:
@@ -69,13 +76,13 @@ def load_faq():
     matches = re.findall(r"(\[FAQ\d+\])\s*\n(.+?)(?=\n\[FAQ|\Z)", page, re.S)
     for code, answer in matches:
         faq[code.strip()] = answer.strip()
+    print(f"✅ Loaded {len(faq)} FAQ entries.")
     return faq
 
 # -------------------------
 # Initial FAQ load
 # -------------------------
 faq_answers = load_faq()
-print(f"Loaded {len(faq_answers)} FAQ entries from wiki.")
 
 # -------------------------
 # Bot loop variables
@@ -87,6 +94,7 @@ replied_comments = set()
 # -------------------------
 # Main loop: monitor comments
 # -------------------------
+print("👀 Starting comment stream...")
 for comment in subreddit.stream.comments(skip_existing=True):
     # Reload FAQ periodically
     if time.time() - last_reload > reload_interval:
