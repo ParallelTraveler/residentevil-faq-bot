@@ -24,6 +24,21 @@ def start_http_server():
 threading.Thread(target=start_http_server, daemon=True).start()
 
 # -------------------------
+# Check environment variables
+# -------------------------
+print("🔍 Checking environment variables...")
+required_vars = [
+    "REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET", "REDDIT_USERNAME",
+    "REDDIT_PASSWORD", "REDDIT_USER_AGENT", "SUBREDDIT"
+]
+
+for var in required_vars:
+    if os.environ.get(var) is None:
+        print(f"❌ Missing environment variable: {var}")
+    else:
+        print(f"✅ Found: {var}")
+
+# -------------------------
 # Reddit bot setup
 # -------------------------
 reddit = praw.Reddit(
