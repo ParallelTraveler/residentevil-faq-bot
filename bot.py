@@ -56,3 +56,86 @@ try:
         username=os.environ["REDDIT_USERNAME"],
         password=os.environ["REDDIT_PASSWORD"],
         user_agent=os.environ["REDDIT_USER_AGENT"]
+    )
+    subreddit_name = os.environ["SUBREDDIT"]
+    subreddit = reddit.subreddit(subreddit_name)
+    print(f"✅ Logged in as: {reddit.user.me()}")
+    print(f"Monitoring subreddit: r/{subreddit_name}")
+except Exception as e:
+    print("❌ Reddit setup failed:", e)
+    traceback.print_exc()
+    sys.exit(1)
+
+# -------------------------
+# Function to load FAQ from wiki
+# -------------------------
+def load_faq():
+    print("📘 Loading FAQ from subreddit wiki...")
+    try:
+        page = subreddit.wiki["faq"].content_md
+    except praw.exceptions.RedditAPIException as e:
+        print("❌ Reddit API returned an error while accessing the wiki page:")
+        print(e)
+        return {}
+    except prawcore.exceptions.NotFound:
+        print("❌ Could not find the FAQ wiki page.")
+        print("   • Check that the page 'faq' exists in your subreddit.")
+        print("   • Check that your bot user has permission to view it (mod or approved wiki editor with view rights).")
+        return {}
+    except Exception as e:
+        print("❌ Unexpected error while loading wiki:")
+        print(e)
+        traceback.print_exc()
+        return {}
+
+    faq = {}
+    matches = re.findall(r"(\[FAQ\d+\])\s*\n(.+?)(?=\n\[FAQ|\Z)", page, re.S)
+    for code, answer in matches:
+        faq[code.strip()] = answer.strip()
+    print(f"✅ Loaded {len(faq)} FAQ entries.")
+    return faq
+
+# -------------------------
+# Initial FAQ load
+# -------------------------
+faq_answers = load_faq()
+reload_interval = 300  # seconds
+
+# -------------------------
+# Main bot loop
+# -------------------------
+def main_bot_loop():
+    global faq_answers
+    last_reload = time.time()
+    replied_comments = set()
+
+    print("🤖 Bot is now watching comments...")
+    try:
+        for comment in subreddit.stream.comments(skip_existing=True):
+            # Reload FAQ periodically
+            if time.time() - last_reload > reload_interval:
+                faq_answers = load_faq()
+                last_reload = time.time()
+                print(f"🔄 Reloaded FAQ from wiki ({len(faq_answers)} entries)")
+
+            if comment.id in replied_comments:
+                continue
+
+            for code, answer in faq_answers.items():
+                if code in comment.body:
+                    try:
+                        comment.reply(answer)
+                        replied_comments.add(comment.id)
+                        print(f"✅ Replied to {comment.author} with {code}")
+                    except Exception as e:
+                        print(f"⚠️ Error replying: {e}")
+                        traceback.print_exc()
+                    break
+
+            time.sleep(2)
+    except Exception as e:
+        print("❌ Fatal error in main loop:", e)
+        traceback.print_exc()
+
+# Run the bot loop in the main thread
+main_bot_loop()
