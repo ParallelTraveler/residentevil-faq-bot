@@ -71,18 +71,29 @@ def load_faq():
     print("📘 Loading FAQ from subreddit wiki...")
     try:
         page = subreddit.wiki["faq"].content_md
-        faq = {}
-        matches = re.findall(r"(\[FAQ\d+\])\s*\n(.+?)(?=\n\[FAQ|\Z)", page, re.S)
-        for code, answer in matches:
-            faq[code.strip()] = answer.strip()
-        print(f"✅ Loaded {len(faq)} FAQ entries.")
-        return faq
+    except praw.exceptions.RedditAPIException as e:
+        print("❌ Reddit API returned an error while accessing the wiki page:")
+        print(e)
+        return {}
+    except prawcore.exceptions.NotFound:
+        print("❌ Could not find the FAQ wiki page.")
+        print("   • Check that the page 'faq' exists in your subreddit.")
+        print("   • Check that your bot user has permission to view it (mod or approved wiki editor with view rights).")
+        return {}
     except Exception as e:
-        print(f"⚠️ Error loading wiki: {e}")
-        traceback.print_exc()
+        print("❌ Unexpected error while loading wiki:")
+        print(e)
         return {}
 
+    faq = {}
+    matches = re.findall(r"(\[FAQ\d+\])\s*\n(.+?)(?=\n\[FAQ|\Z)", page, re.S)
+    for code, answer in matches:
+        faq[code.strip()] = answer.strip()
+    print(f"✅ Loaded {len(faq)} FAQ entries.")
+    return faq
+
 faq_answers = load_faq()
+
 
 # -------------------------
 # Bot loop
