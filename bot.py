@@ -2,6 +2,7 @@ import os
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import praw
+import prawcore
 import time
 import re
 import sys
