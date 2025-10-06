@@ -44,18 +44,20 @@ except Exception as e:
     traceback.print_exc()
 
 # -------------------------
-# Test: load wiki FAQ
+# Test: load FAQ page with different variations
 # -------------------------
-print("\n📘 Attempting to load the 'faq' wiki page...")
-try:
-    page = subreddit.wiki["faq"].content_md
-    print("✅ Successfully loaded the FAQ wiki page!")
-    print(f"Page length: {len(page)} characters")
-except prawcore.exceptions.NotFound:
-    print("❌ Could not find the FAQ wiki page.")
-    print("   • Check that the page 'faq' exists in your subreddit.")
-    print("   • Check that your bot account has permission to view it.")
-except Exception as e:
-    print("❌ Unexpected error while loading wiki:")
-    print(e)
-    traceback.print_exc()
+print("\n📘 Attempting to load 'faq' page variations...")
+
+faq_variations = ["faq", "FAQ", "Faq"]
+for name in faq_variations:
+    try:
+        page = subreddit.wiki[name].content_md
+        print(f"✅ Successfully loaded page: {name}")
+        print(f"First 500 characters:\n{page[:500]}")
+        break  # Stop after the first one that works
+    except prawcore.exceptions.NotFound:
+        print(f"❌ Could not find page: {name}")
+    except Exception as e:
+        print(f"⚠️ Unexpected error loading page {name}:")
+        print(e)
+        traceback.print_exc()
