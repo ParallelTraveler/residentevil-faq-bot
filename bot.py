@@ -19,15 +19,19 @@ class DummyHandler(BaseHTTPRequestHandler):
 def start_http_server():
     port = int(os.environ.get("PORT", 10000))
     server = HTTPServer(("0.0.0.0", port), DummyHandler)
-    print(f"🌐 Web server running on port {port}")
+    print(f"🌐 Web server running on port {port}", flush=True)
     server.serve_forever()
 
 threading.Thread(target=start_http_server, daemon=True).start()
 
 # -------------------------
+# Startup message
+# -------------------------
+print("🚀 bot.py started...", flush=True)
+
+# -------------------------
 # Environment check
 # -------------------------
-print("🚀 bot.py started...")
 required_vars = [
     "REDDIT_CLIENT_ID",
     "REDDIT_CLIENT_SECRET",
@@ -36,11 +40,12 @@ required_vars = [
     "REDDIT_USER_AGENT",
     "SUBREDDIT",
 ]
+
 missing = [v for v in required_vars if v not in os.environ or not os.environ[v]]
 if missing:
     raise EnvironmentError(f"❌ Missing environment variables: {', '.join(missing)}")
 else:
-    print("✅ All required environment variables found.")
+    print("✅ All required environment variables found.", flush=True)
 
 # -------------------------
 # Reddit setup
@@ -56,38 +61,40 @@ reddit = praw.Reddit(
 subreddit_name = os.environ["SUBREDDIT"]
 subreddit = reddit.subreddit(subreddit_name)
 
-print(f"✅ Logged in as: {reddit.user.me()}")
-print(f"📍 Target subreddit: r/{subreddit_name}")
+print(f"✅ Logged in as: {reddit.user.me()}", flush=True)
+print(f"📍 Target subreddit: r/{subreddit_name}", flush=True)
 
 # -------------------------
 # Load FAQ from wiki
 # -------------------------
 def load_faq():
-    wiki_page_name = "ifaq"  # use the page you confirmed works
-    print(f"📘 Checking wiki page '{wiki_page_name}'...")
-
+    wiki_page_name = "ifaq"  # your confirmed readable page
+    print(f"📘 Checking wiki page '{wiki_page_name}'...", flush=True)
     try:
         page = subreddit.wiki[wiki_page_name].content_md
-        print(f"✅ Loaded '{wiki_page_name}' page successfully ({len(page)} characters).")
+        print(f"✅ Loaded '{wiki_page_name}' page successfully ({len(page)} characters).", flush=True)
     except prawcore.exceptions.NotFound:
-        print(f"❌ Could not find the '{wiki_page_name}' wiki page.")
+        print(f"❌ Could not find the '{wiki_page_name}' wiki page.", flush=True)
+        return {}
+    except Exception as e:
+        print(f"❌ Error loading wiki: {e}", flush=True)
+        traceback.print_exc()
         return {}
 
     faq = {}
     matches = re.findall(r"(\[FAQ\d+\])\s*\n(.+?)(?=\n\[FAQ|\Z)", page, re.S)
     for code, answer in matches:
         faq[code.strip()] = answer.strip()
-
-    print(f"📖 Parsed {len(faq)} FAQ entries.")
+    print(f"📖 Parsed {len(faq)} FAQ entries.", flush=True)
     return faq
 
 faq_answers = load_faq()
 last_reload = time.time()
-reload_interval = 600  # every 10 minutes
+reload_interval = 600  # 10 minutes
 replied_comments = set()
 
 # -------------------------
-# Handle comments
+# Handle comment replies
 # -------------------------
 def handle_comment(comment):
     try:
@@ -95,19 +102,17 @@ def handle_comment(comment):
             if code in comment.body:
                 comment.reply(answer)
                 replied_comments.add(comment.id)
-                print(f"💬 Replied to u/{comment.author} with {code}")
+                print(f"💬 Replied to u/{comment.author} with {code}", flush=True)
                 break
     except Exception as e:
-        print(f"⚠️ Error replying to comment {comment.id}: {e}")
+        print(f"⚠️ Error replying to comment {comment.id}: {e}", flush=True)
         traceback.print_exc()
 
 # -------------------------
 # Main loop
 # -------------------------
 def main():
-    print("🔍 Monitoring subreddit comments...")
-
-    # Cache bot username for skip check
+    print("🔍 Monitoring subreddit comments...", flush=True)
     bot_username = str(reddit.user.me()).lower()
 
     while True:
@@ -118,7 +123,7 @@ def main():
 
                 # Reload FAQ periodically
                 if time.time() - last_reload > reload_interval:
-                    print("🔄 Reloading FAQ from wiki...")
+                    print("🔄 Reloading FAQ from wiki...", flush=True)
                     globals()["faq_answers"] = load_faq()
                     globals()["last_reload"] = time.time()
 
@@ -127,7 +132,7 @@ def main():
 
                 time.sleep(2)
         except Exception as e:
-            print(f"⚠️ Stream error: {e}")
+            print(f"⚠️ Stream error: {e}", flush=True)
             traceback.print_exc()
             time.sleep(30)
 
