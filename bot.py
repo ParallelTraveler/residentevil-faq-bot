@@ -47,7 +47,7 @@ try:
         print("   •", page.name)
 
     print("\n📘 Trying to load 'faq' page...")
-    page = subreddit.wiki["faq"].content_md
+    page = subreddit.wiki["FAQ"].content_md
     print("✅ Successfully loaded FAQ page!")
     print(page[:500])  # show first 500 characters
 except prawcore.exceptions.NotFound:
