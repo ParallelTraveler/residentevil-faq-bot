@@ -1,104 +1,79 @@
 import os
-import threading
 import time
-import re
-from http.server import HTTPServer, BaseHTTPRequestHandler
+import threading
+from http.server import SimpleHTTPRequestHandler, HTTPServer
 import praw
 import prawcore
 import traceback
+import sys
 
 # -------------------------
-# Dummy HTTP server (required by Render)
+# Startup confirmation
 # -------------------------
-class DummyHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Reddit FAQ bot is running!")
-
-def start_http_server():
-    port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(('0.0.0.0', port), DummyHandler)
-    print(f"🟢 Dummy HTTP server running on port {port}")
-    server.serve_forever()
-
-threading.Thread(target=start_http_server, daemon=True).start()
+print("🚀 bot.py started...", flush=True)
 
 # -------------------------
-# Reddit API setup
+# Reddit bot setup
 # -------------------------
-print("🚀 Starting bot.py...")
+required_vars = [
+    "REDDIT_CLIENT_ID",
+    "REDDIT_CLIENT_SECRET",
+    "REDDIT_USERNAME",
+    "REDDIT_PASSWORD",
+    "REDDIT_USER_AGENT",
+    "SUBREDDIT",
+]
+
+missing = [v for v in required_vars if v not in os.environ or not os.environ[v]]
+if missing:
+    print(f"❌ Missing environment variables: {', '.join(missing)}", flush=True)
+    sys.exit(1)
+
 reddit = praw.Reddit(
     client_id=os.environ["REDDIT_CLIENT_ID"],
     client_secret=os.environ["REDDIT_CLIENT_SECRET"],
     username=os.environ["REDDIT_USERNAME"],
     password=os.environ["REDDIT_PASSWORD"],
-    user_agent=os.environ["REDDIT_USER_AGENT"]
+    user_agent=os.environ["REDDIT_USER_AGENT"],
 )
 
 subreddit_name = os.environ["SUBREDDIT"]
 subreddit = reddit.subreddit(subreddit_name)
 
 print(f"✅ Logged in as: {reddit.user.me()}")
-print(f"Monitoring subreddit: r/{subreddit_name}")
+print(f"📍 Target subreddit: r/{subreddit_name}")
 
 # -------------------------
-# Load FAQ from wiki (old Reddit)
+# Tiny web server for Render
 # -------------------------
-def load_faq():
-    print("📘 Loading FAQ from subreddit wiki...")
-    try:
-        page = subreddit.wiki["ifaq"].content_md  # ← use your working page here
-        faq = {}
-        matches = re.findall(r"(\[FAQ\d+\])\s*\n(.+?)(?=\n\[FAQ|\Z)", page, re.S)
-        for code, answer in matches:
-            faq[code.strip()] = answer.strip()
-        print(f"✅ Loaded {len(faq)} FAQ entries.")
-        return faq
-    except prawcore.exceptions.NotFound:
-        print("❌ Could not find the wiki page '/ifaq'. Make sure it exists on OLD Reddit.")
-    except Exception as e:
-        print("⚠️ Error loading wiki:", e)
-        traceback.print_exc()
-    return {}
+def run_http():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), SimpleHTTPRequestHandler)
+    print(f"🌐 Web server running on port {port}", flush=True)
+    server.serve_forever()
 
-faq_answers = load_faq()
-
-# -------------------------
-# Bot loop setup
-# -------------------------
-last_reload = time.time()
-reload_interval = 300  # 5 minutes
-replied_comments = set()
+threading.Thread(target=run_http, daemon=True).start()
 
 # -------------------------
 # Main bot loop
 # -------------------------
-print("🤖 Bot is now watching comments...")
-
-for comment in subreddit.stream.comments(skip_existing=True):
+def check_wiki():
     try:
-        # Periodically reload FAQ
-        if time.time() - last_reload > reload_interval:
-            faq_answers = load_faq()
-            last_reload = time.time()
-
-        # Skip already replied comments
-        if comment.id in replied_comments:
-            continue
-
-        # Look for FAQ codes
-        for code, answer in faq_answers.items():
-            if code in comment.body:
-                try:
-                    comment.reply(answer)
-                    replied_comments.add(comment.id)
-                    print(f"✅ Replied to u/{comment.author} with {code}")
-                except Exception as e:
-                    print(f"⚠️ Error replying: {e}")
-                break
-
-        time.sleep(2)
+        print("📘 Checking wiki page 'ifaq'...", flush=True)
+        page = subreddit.wiki["ifaq"].content_md
+        print(f"✅ Loaded 'ifaq' page successfully ({len(page)} characters).", flush=True)
+    except prawcore.exceptions.NotFound:
+        print("❌ Could not find the 'ifaq' wiki page.", flush=True)
+        print("   • Ensure it exists and the bot has permission to read it.")
     except Exception as e:
-        print("⚠️ Stream error:", e)
-        time.sleep(10)
+        print("⚠️ Unexpected error while loading 'ifaq':", e, flush=True)
+        traceback.print_exc()
+
+# -------------------------
+# Run continuously
+# -------------------------
+if __name__ == "__main__":
+    while True:
+        check_wiki()
+        print("⏳ Waiting 10 minutes before next check...", flush=True)
+        time.sleep(600)
