@@ -18,15 +18,33 @@ subreddit_name = os.environ["SUBREDDIT"]
 subreddit = reddit.subreddit(subreddit_name)
 
 print(f"✅ Logged in as: {reddit.user.me()}")
-print(f"Checking wiki page in subreddit: r/{subreddit_name}")
+print(f"Checking wiki access in subreddit: r/{subreddit_name}")
+
+# -------------------------
+# List all wiki pages the bot can see
+# -------------------------
+print("📘 Listing wiki pages visible to the bot...")
+try:
+    pages = list(subreddit.wiki)
+    if pages:
+        print("✅ Bot can see the following wiki pages:")
+        for page in pages:
+            print(f"   • {page}")
+    else:
+        print("⚠️ Bot cannot see any wiki pages.")
+except Exception as e:
+    print("❌ Error while fetching wiki pages:")
+    print(e)
+    traceback.print_exc()
 
 # -------------------------
 # Test: load wiki FAQ
 # -------------------------
+print("\n📘 Attempting to load the 'faq' wiki page...")
 try:
     page = subreddit.wiki["faq"].content_md
-    print("📘 Wiki page content:")
-    print(page)
+    print("✅ Successfully loaded the FAQ wiki page!")
+    print(f"Page length: {len(page)} characters")
 except prawcore.exceptions.NotFound:
     print("❌ Could not find the FAQ wiki page.")
     print("   • Check that the page 'faq' exists in your subreddit.")
