@@ -1,145 +1,115 @@
 import os
-import time
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import praw
 import prawcore
-import traceback
+import time
 import re
+import traceback
 
 # -------------------------
-# Tiny HTTP server (Render health check)
+# Tiny HTTP server (required by Render)
 # -------------------------
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"ResidentEvil FAQ Bot is running!")
+        self.wfile.write(b"Reddit bot running!")
 
 def start_http_server():
     port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(("0.0.0.0", port), DummyHandler)
-    print(f"🌐 Web server running on port {port}", flush=True)
+    server = HTTPServer(('0.0.0.0', port), DummyHandler)
+    print(f"🟢 Dummy HTTP server running on port {port}")
     server.serve_forever()
 
 threading.Thread(target=start_http_server, daemon=True).start()
 
 # -------------------------
-# Startup message
-# -------------------------
-print("🚀 bot.py started...", flush=True)
-
-# -------------------------
-# Environment check
-# -------------------------
-required_vars = [
-    "REDDIT_CLIENT_ID",
-    "REDDIT_CLIENT_SECRET",
-    "REDDIT_USERNAME",
-    "REDDIT_PASSWORD",
-    "REDDIT_USER_AGENT",
-    "SUBREDDIT",
-]
-
-missing = [v for v in required_vars if v not in os.environ or not os.environ[v]]
-if missing:
-    raise EnvironmentError(f"❌ Missing environment variables: {', '.join(missing)}")
-else:
-    print("✅ All required environment variables found.", flush=True)
-
-# -------------------------
-# Reddit setup
+# Reddit bot setup
 # -------------------------
 reddit = praw.Reddit(
     client_id=os.environ["REDDIT_CLIENT_ID"],
     client_secret=os.environ["REDDIT_CLIENT_SECRET"],
     username=os.environ["REDDIT_USERNAME"],
     password=os.environ["REDDIT_PASSWORD"],
-    user_agent=os.environ["REDDIT_USER_AGENT"],
+    user_agent=os.environ["REDDIT_USER_AGENT"]
 )
 
 subreddit_name = os.environ["SUBREDDIT"]
 subreddit = reddit.subreddit(subreddit_name)
 
-print(f"✅ Logged in as: {reddit.user.me()}", flush=True)
-print(f"📍 Target subreddit: r/{subreddit_name}", flush=True)
+print(f"✅ Logged in as: {reddit.user.me()}")
+print(f"📍 Target subreddit: r/{subreddit_name}")
 
 # -------------------------
-# Load FAQ from wiki
+# Function to load FAQ from wiki
 # -------------------------
 def load_faq():
-    wiki_page_name = "ifaq"  # your confirmed readable page
-    print(f"📘 Checking wiki page '{wiki_page_name}'...", flush=True)
+    print("📘 Loading FAQ from subreddit wiki...")
     try:
-        page = subreddit.wiki[wiki_page_name].content_md
-        print(f"✅ Loaded '{wiki_page_name}' page successfully ({len(page)} characters).", flush=True)
+        page = subreddit.wiki["ifaq"].content_md  # Adjust your wiki page name here
+        faq = {}
+        matches = re.findall(r"(\[FAQ\d+\])\s*\n(.+?)(?=\n\[FAQ|\Z)", page, re.S)
+        for code, answer in matches:
+            # Normalize code to lowercase and strip spaces
+            faq[code.strip().lower()] = answer.strip()
+        print(f"✅ Loaded {len(faq)} FAQ entries.")
+        return faq
     except prawcore.exceptions.NotFound:
-        print(f"❌ Could not find the '{wiki_page_name}' wiki page.", flush=True)
+        print("❌ Could not find the FAQ wiki page.")
+        print("   • Check that the page exists.")
+        print("   • Check that the bot account has permission to view it.")
         return {}
     except Exception as e:
-        print(f"❌ Error loading wiki: {e}", flush=True)
+        print("❌ Unexpected error while loading wiki:")
+        print(e)
         traceback.print_exc()
         return {}
 
-    faq = {}
-    matches = re.findall(r"(\[FAQ\d+\])\s*\n(.+?)(?=\n\[FAQ|\Z)", page, re.S)
-    for code, answer in matches:
-        faq[code.strip().lower()] = answer.strip()
-    print(f"📖 Parsed {len(faq)} FAQ entries.", flush=True)
-    return faq
-
 faq_answers = load_faq()
+
+# -------------------------
+# Bot loop variables
+# -------------------------
 last_reload = time.time()
-reload_interval = 600  # 10 minutes
+reload_interval = 300  # seconds
 replied_comments = set()
 
 # -------------------------
-# Handle comment replies
+# Main loop: monitor comments
 # -------------------------
-def handle_comment(comment):
-    body = comment.body.lower()
+print("🔍 Monitoring subreddit comments...")
+for comment in subreddit.stream.comments(skip_existing=True):
+    # Reload FAQ periodically
+    if time.time() - last_reload > reload_interval:
+        faq_answers = load_faq()
+        last_reload = time.time()
+        print(f"🔄 Reloaded FAQ from wiki ({len(faq_answers)} entries)")
+
+    if comment.id in replied_comments:
+        continue
+
+    body = comment.body.lower().strip()
+    # Remove trailing whitespace and newlines after FAQ code
+    body_clean = re.sub(r"\s+", " ", body)
+    print(f"👀 Seen comment {comment.id} by {comment.author}: '{body_clean}'")  # debug
+
+    # Check FAQ codes
+    matched = False
     for code, answer in faq_answers.items():
-        if code in body:
+        print(f"   🔍 Comparing against code: '{code}'")  # debug
+        # Match code even if it's followed by spaces/newlines in comment
+        if re.search(re.escape(code) + r"(\s|$)", body_clean):
             try:
                 comment.reply(answer)
                 replied_comments.add(comment.id)
-                print(f"💬 Replied to u/{comment.author} with {code}", flush=True)
+                matched = True
+                print(f"💬 Replied to u/{comment.author} with {code}")
             except Exception as e:
-                print(f"⚠️ Error replying to comment {comment.id}: {e}", flush=True)
-                traceback.print_exc()
+                print(f"⚠️ Error replying: {e}")
             break
 
-# -------------------------
-# Main loop
-# -------------------------
-def main():
-    print("🔍 Monitoring subreddit comments...", flush=True)
-    bot_username = str(reddit.user.me()).lower()
+    if not matched:
+        print("   ❌ No matching FAQ code found.")
 
-    while True:
-        try:
-            for comment in subreddit.stream.comments(skip_existing=True):
-                author_name = comment.author.name if comment.author else "[deleted]"
-                print(f"👀 Seen comment {comment.id} by {author_name}", flush=True)
-
-                # Skip own comments
-                if comment.author and comment.author.name.lower() == bot_username:
-                    continue
-
-                # Reload FAQ periodically
-                if time.time() - last_reload > reload_interval:
-                    print("🔄 Reloading FAQ from wiki...", flush=True)
-                    globals()["faq_answers"] = load_faq()
-                    globals()["last_reload"] = time.time()
-
-                if comment.id not in replied_comments:
-                    handle_comment(comment)
-
-                time.sleep(2)
-        except Exception as e:
-            print(f"⚠️ Stream error: {e}", flush=True)
-            traceback.print_exc()
-            time.sleep(30)
-
-if __name__ == "__main__":
-    main()
+    time.sleep(2)
