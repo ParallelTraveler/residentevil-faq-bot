@@ -13,7 +13,6 @@ reddit = praw.Reddit(
     password=os.environ["REDDIT_PASSWORD"],
     user_agent=os.environ["REDDIT_USER_AGENT"]
 )
-print("Bot scopes:", reddit.auth.scopes())
 
 subreddit_name = os.environ["SUBREDDIT"]
 subreddit = reddit.subreddit(subreddit_name)
@@ -22,9 +21,15 @@ print(f"✅ Logged in as: {reddit.user.me()}")
 print(f"Checking wiki access in subreddit: r/{subreddit_name}")
 
 # -------------------------
+# Print bot scopes
+# -------------------------
+print("🔍 Checking bot authentication scopes...")
+print("Bot scopes:", reddit.auth.scopes())
+
+# -------------------------
 # List all wiki pages the bot can see
 # -------------------------
-print("📘 Listing wiki pages visible to the bot...")
+print("\n📘 Listing wiki pages visible to the bot...")
 try:
     pages = list(subreddit.wiki)
     if pages:
@@ -43,18 +48,14 @@ except Exception as e:
 # -------------------------
 print("\n📘 Attempting to load the 'faq' wiki page...")
 try:
-    print("🔍 Listing accessible wiki pages...")
-    for page in subreddit.wiki:
-        print("   •", page.name)
-
-    print("\n📘 Trying to load 'faq' page...")
-    page = subreddit.wiki["FAQ"].content_md
-    print("✅ Successfully loaded FAQ page!")
-    print(page[:500])  # show first 500 characters
+    page = subreddit.wiki["faq"].content_md
+    print("✅ Successfully loaded the FAQ wiki page!")
+    print(f"Page length: {len(page)} characters")
 except prawcore.exceptions.NotFound:
-    print("❌ Still could not find 'faq' wiki page via API.")
+    print("❌ Could not find the FAQ wiki page.")
+    print("   • Check that the page 'faq' exists in your subreddit.")
+    print("   • Check that your bot account has permission to view it.")
 except Exception as e:
-    print("⚠️ Other error:")
+    print("❌ Unexpected error while loading wiki:")
     print(e)
     traceback.print_exc()
-
