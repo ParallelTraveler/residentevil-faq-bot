@@ -84,7 +84,7 @@ def load_faq():
     faq = {}
     matches = re.findall(r"(\[FAQ\d+\])\s*\n(.+?)(?=\n\[FAQ|\Z)", page, re.S)
     for code, answer in matches:
-        faq[code.strip()] = answer.strip()
+        faq[code.strip().lower()] = answer.strip()
     print(f"📖 Parsed {len(faq)} FAQ entries.", flush=True)
     return faq
 
@@ -97,16 +97,17 @@ replied_comments = set()
 # Handle comment replies
 # -------------------------
 def handle_comment(comment):
-    try:
-        for code, answer in faq_answers.items():
-            if code in comment.body:
+    body = comment.body.lower()
+    for code, answer in faq_answers.items():
+        if code in body:
+            try:
                 comment.reply(answer)
                 replied_comments.add(comment.id)
                 print(f"💬 Replied to u/{comment.author} with {code}", flush=True)
-                break
-    except Exception as e:
-        print(f"⚠️ Error replying to comment {comment.id}: {e}", flush=True)
-        traceback.print_exc()
+            except Exception as e:
+                print(f"⚠️ Error replying to comment {comment.id}: {e}", flush=True)
+                traceback.print_exc()
+            break
 
 # -------------------------
 # Main loop
@@ -118,8 +119,12 @@ def main():
     while True:
         try:
             for comment in subreddit.stream.comments(skip_existing=True):
+                author_name = comment.author.name if comment.author else "[deleted]"
+                print(f"👀 Seen comment {comment.id} by {author_name}", flush=True)
+
+                # Skip own comments
                 if comment.author and comment.author.name.lower() == bot_username:
-                    continue  # skip own comments
+                    continue
 
                 # Reload FAQ periodically
                 if time.time() - last_reload > reload_interval:
