@@ -13,6 +13,7 @@ reddit = praw.Reddit(
     password=os.environ["REDDIT_PASSWORD"],
     user_agent=os.environ["REDDIT_USER_AGENT"]
 )
+print("Bot scopes:", reddit.auth.scopes())
 
 subreddit_name = os.environ["SUBREDDIT"]
 subreddit = reddit.subreddit(subreddit_name)
