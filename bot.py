@@ -97,9 +97,10 @@ replied_comments = set()
 # Handle comment replies
 # -------------------------
 def handle_comment(comment):
-    body = comment.body.lower()
+    body = re.sub(r"\s+", " ", comment.body.lower()).strip()  # normalize spaces and lowercase
     for code, answer in faq_answers.items():
-        if code in body:
+        # regex to match the code as a word, case-insensitive
+        if re.search(rf"\b{re.escape(code)}\b", body):
             try:
                 comment.reply(answer)
                 replied_comments.add(comment.id)
