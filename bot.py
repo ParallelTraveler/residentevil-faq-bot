@@ -35,7 +35,7 @@ try:
         password=os.environ["REDDIT_PASSWORD"],
         user_agent=os.environ["REDDIT_USER_AGENT"]
     )
-    print(f"✅ Logged in as: {reddit.user.me()}")
+    print(f"✅ Logged in as: {reddit.user.me().name}")
 except Exception as e:
     print("❌ Error logging into Reddit:")
     print(e)
@@ -78,7 +78,7 @@ faq_answers = load_faq()
 last_reload = time.time()
 reload_interval = 300  # seconds
 replied_comments = set()
-bot_username = reddit.user.me().lower()
+bot_username = reddit.user.me().name.lower()  # fix for AttributeError
 
 # -------------------------
 # Main loop: monitor comments
