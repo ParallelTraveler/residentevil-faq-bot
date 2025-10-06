@@ -18,13 +18,7 @@ subreddit_name = os.environ["SUBREDDIT"]
 subreddit = reddit.subreddit(subreddit_name)
 
 print(f"✅ Logged in as: {reddit.user.me()}")
-print(f"Checking wiki access in subreddit: r/{subreddit_name}")
-
-# -------------------------
-# Print bot scopes
-# -------------------------
-print("\n🔍 Checking bot authentication scopes...")
-print("Bot scopes:", reddit.auth.scopes())
+print(f"Checking wiki pages in subreddit: r/{subreddit_name}")
 
 # -------------------------
 # List all wiki pages the bot can see
@@ -35,7 +29,7 @@ try:
     if pages:
         print("Wiki pages detected:")
         for p in pages:
-            print(f"   • '{p.name}'")  # print exact PRAW page name
+            print(f"   • '{p.name}'")  # exact name PRAW sees
     else:
         print("⚠️ No wiki pages detected.")
 except Exception as e:
@@ -44,17 +38,17 @@ except Exception as e:
     traceback.print_exc()
 
 # -------------------------
-# Test: attempt to load FAQ
+# Test: attempt to load FAQ page(s)
 # -------------------------
-print("\n📘 Attempting to load the FAQ wiki page...")
-faq_variations = ["faq", "FAQ", "Faq"]  # you can add more variations if needed
+faq_variations = ["faq", "FAQ", "Faq"]  # add variations as needed
 faq_loaded = False
 
+print("\n📘 Attempting to load FAQ page variations...")
 for name in faq_variations:
     try:
         page = subreddit.wiki[name].content_md
         print(f"✅ Successfully loaded FAQ page as: '{name}'")
-        print(f"First 500 characters:\n{page[:500]}")
+        print(f"First 500 characters of content:\n{page[:500]}")
         faq_loaded = True
         break  # stop after first successful load
     except prawcore.exceptions.NotFound:
@@ -66,5 +60,5 @@ for name in faq_variations:
 
 if not faq_loaded:
     print("\n❌ FAQ page could not be loaded.")
-    print("   • Check exact wiki page name and spelling (case-sensitive).")
-    print("   • Ensure the bot is approved as a wiki editor or has proper permissions.")
+    print("   • Check exact wiki page name (case-sensitive).")
+    print("   • Check the bot has permission to read this page.")
