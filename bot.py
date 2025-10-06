@@ -1,43 +1,56 @@
 import os
-import re
 import time
-import traceback
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 import praw
 import prawcore
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from threading import Thread
+import traceback
+import re
 
 # -------------------------
-# Dummy web server (keeps Render alive)
+# Tiny HTTP server (Render health check)
 # -------------------------
-class SimpleHandler(BaseHTTPRequestHandler):
+class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Bot is running.")
-    def do_HEAD(self):
-        self.send_response(200)
-        self.end_headers()
+        self.wfile.write(b"ResidentEvil FAQ Bot is running!")
 
-def run_server():
+def start_http_server():
     port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(("", port), SimpleHandler)
+    server = HTTPServer(("0.0.0.0", port), DummyHandler)
     print(f"🌐 Web server running on port {port}")
     server.serve_forever()
 
-Thread(target=run_server, daemon=True).start()
+threading.Thread(target=start_http_server, daemon=True).start()
+
+# -------------------------
+# Environment check
+# -------------------------
+print("🚀 bot.py started...")
+required_vars = [
+    "REDDIT_CLIENT_ID",
+    "REDDIT_CLIENT_SECRET",
+    "REDDIT_USERNAME",
+    "REDDIT_PASSWORD",
+    "REDDIT_USER_AGENT",
+    "SUBREDDIT",
+]
+missing = [v for v in required_vars if v not in os.environ or not os.environ[v]]
+if missing:
+    raise EnvironmentError(f"❌ Missing environment variables: {', '.join(missing)}")
+else:
+    print("✅ All required environment variables found.")
 
 # -------------------------
 # Reddit setup
 # -------------------------
-print("🚀 bot.py started...")
-
 reddit = praw.Reddit(
     client_id=os.environ["REDDIT_CLIENT_ID"],
     client_secret=os.environ["REDDIT_CLIENT_SECRET"],
     username=os.environ["REDDIT_USERNAME"],
     password=os.environ["REDDIT_PASSWORD"],
-    user_agent=os.environ["REDDIT_USER_AGENT"]
+    user_agent=os.environ["REDDIT_USER_AGENT"],
 )
 
 subreddit_name = os.environ["SUBREDDIT"]
@@ -50,51 +63,69 @@ print(f"📍 Target subreddit: r/{subreddit_name}")
 # Load FAQ from wiki
 # -------------------------
 def load_faq():
-    print("📘 Checking wiki page 'ifaq'...")
+    wiki_page_name = "ifaq"  # use the page you confirmed works
+    print(f"📘 Checking wiki page '{wiki_page_name}'...")
+
     try:
-        page = subreddit.wiki["ifaq"].content_md
-        faq = {}
-        matches = re.findall(r"(\[FAQ\d+\])\s*\n(.+?)(?=\n\[FAQ|\Z)", page, re.S)
-        for code, answer in matches:
-            faq[code.strip().upper()] = answer.strip()
-        print(f"✅ Loaded {len(faq)} FAQ entries.")
-        return faq
+        page = subreddit.wiki[wiki_page_name].content_md
+        print(f"✅ Loaded '{wiki_page_name}' page successfully ({len(page)} characters).")
     except prawcore.exceptions.NotFound:
-        print("❌ Could not find the 'ifaq' wiki page.")
+        print(f"❌ Could not find the '{wiki_page_name}' wiki page.")
         return {}
-    except Exception as e:
-        print(f"⚠️ Error loading wiki: {e}")
-        traceback.print_exc()
-        return {}
+
+    faq = {}
+    matches = re.findall(r"(\[FAQ\d+\])\s*\n(.+?)(?=\n\[FAQ|\Z)", page, re.S)
+    for code, answer in matches:
+        faq[code.strip()] = answer.strip()
+
+    print(f"📖 Parsed {len(faq)} FAQ entries.")
+    return faq
 
 faq_answers = load_faq()
+last_reload = time.time()
+reload_interval = 600  # every 10 minutes
+replied_comments = set()
 
 # -------------------------
-# Reply to FAQ codes in comments
+# Handle comments
 # -------------------------
 def handle_comment(comment):
-    text = comment.body.upper()
-    for code, answer in faq_answers.items():
-        if code in text:
-            print(f"💬 Match found: {code} in comment {comment.id}")
-            try:
+    try:
+        for code, answer in faq_answers.items():
+            if code in comment.body:
                 comment.reply(answer)
-                print(f"✅ Replied to comment {comment.id} with {code}")
-            except Exception as e:
-                print(f"⚠️ Error replying to comment {comment.id}: {e}")
-            break  # Stop after first match
+                replied_comments.add(comment.id)
+                print(f"💬 Replied to u/{comment.author} with {code}")
+                break
+    except Exception as e:
+        print(f"⚠️ Error replying to comment {comment.id}: {e}")
+        traceback.print_exc()
 
 # -------------------------
 # Main loop
 # -------------------------
 def main():
     print("🔍 Monitoring subreddit comments...")
+
+    # Cache bot username for skip check
+    bot_username = str(reddit.user.me()).lower()
+
     while True:
         try:
             for comment in subreddit.stream.comments(skip_existing=True):
-                if comment.author and comment.author.name.lower() == reddit.user.me().lower():
+                if comment.author and comment.author.name.lower() == bot_username:
                     continue  # skip own comments
-                handle_comment(comment)
+
+                # Reload FAQ periodically
+                if time.time() - last_reload > reload_interval:
+                    print("🔄 Reloading FAQ from wiki...")
+                    globals()["faq_answers"] = load_faq()
+                    globals()["last_reload"] = time.time()
+
+                if comment.id not in replied_comments:
+                    handle_comment(comment)
+
+                time.sleep(2)
         except Exception as e:
             print(f"⚠️ Stream error: {e}")
             traceback.print_exc()
