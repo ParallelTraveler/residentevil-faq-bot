@@ -8,24 +8,25 @@ import traceback
 import re
 
 # -------------------------
-# Tiny HTTP server (Render health check)
+# Tiny HTTP server (Cron-job / uptime-friendly)
 # -------------------------
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
         self.end_headers()
-        self.wfile.write(b"ResidentEvil FAQ Bot is running!")
+        self.wfile.write(b"OK")  # minimal response
 
 def start_http_server():
     port = int(os.environ.get("PORT", 10000))
     server = HTTPServer(("0.0.0.0", port), DummyHandler)
-    print(f"🌐 Web server running on port {port}", flush=True)
     server.serve_forever()
 
 threading.Thread(target=start_http_server, daemon=True).start()
+print(f"🌐 Minimal web server running on port {os.environ.get('PORT', 10000)}", flush=True)
 
 # -------------------------
-# Startup message
+# Startup
 # -------------------------
 print("🚀 bot.py started...", flush=True)
 
@@ -61,6 +62,7 @@ reddit = praw.Reddit(
 subreddit_name = os.environ["SUBREDDIT"]
 subreddit = reddit.subreddit(subreddit_name)
 
+bot_username = str(reddit.user.me()).lower()
 print(f"✅ Logged in as: {reddit.user.me()}", flush=True)
 print(f"📍 Target subreddit: r/{subreddit_name}", flush=True)
 
@@ -100,7 +102,6 @@ replied_comments = set()
 def handle_comment(comment):
     body = re.sub(r"\s+", " ", comment.body.lower()).strip()  # normalize spaces and lowercase
     for code, answer in faq_answers.items():
-        # match code anywhere in the comment, case-insensitive
         if re.search(rf"\b{re.escape(code)}\b", body):
             try:
                 comment.reply(answer)
@@ -109,15 +110,14 @@ def handle_comment(comment):
             except Exception as e:
                 print(f"⚠️ Error replying to comment {comment.id}: {e}", flush=True)
                 traceback.print_exc()
-            return True  # matched
-    return False  # no match
+            return True
+    return False
 
 # -------------------------
 # Main loop
 # -------------------------
 def main():
     print("🔍 Monitoring subreddit comments...", flush=True)
-    bot_username = str(reddit.user.me()).lower()
 
     while True:
         try:
