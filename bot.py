@@ -68,7 +68,7 @@ print(f"📍 Target subreddit: r/{subreddit_name}", flush=True)
 # Load FAQ from wiki
 # -------------------------
 def load_faq():
-    wiki_page_name = "ifaq"  # your confirmed readable page
+    wiki_page_name = "ifaq"  # confirmed readable page
     print(f"📘 Checking wiki page '{wiki_page_name}'...", flush=True)
     try:
         page = subreddit.wiki[wiki_page_name].content_md
@@ -82,6 +82,7 @@ def load_faq():
         return {}
 
     faq = {}
+    # Parse codes and answers, store codes lowercase
     matches = re.findall(r"(\[FAQ\d+\])\s*\n(.+?)(?=\n\[FAQ|\Z)", page, re.S)
     for code, answer in matches:
         faq[code.strip().lower()] = answer.strip()
@@ -99,7 +100,7 @@ replied_comments = set()
 def handle_comment(comment):
     body = re.sub(r"\s+", " ", comment.body.lower()).strip()  # normalize spaces and lowercase
     for code, answer in faq_answers.items():
-        # regex to match the code as a word, case-insensitive
+        # match code anywhere in the comment, case-insensitive
         if re.search(rf"\b{re.escape(code)}\b", body):
             try:
                 comment.reply(answer)
@@ -108,7 +109,8 @@ def handle_comment(comment):
             except Exception as e:
                 print(f"⚠️ Error replying to comment {comment.id}: {e}", flush=True)
                 traceback.print_exc()
-            break
+            return True  # matched
+    return False  # no match
 
 # -------------------------
 # Main loop
@@ -134,7 +136,9 @@ def main():
                     globals()["last_reload"] = time.time()
 
                 if comment.id not in replied_comments:
-                    handle_comment(comment)
+                    matched = handle_comment(comment)
+                    if not matched:
+                        print(f"⚡ No FAQ code found in comment {comment.id}", flush=True)
 
                 time.sleep(2)
         except Exception as e:
