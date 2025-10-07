@@ -101,13 +101,18 @@ replied_comments = set()
 # -------------------------
 def handle_comment(comment):
     body = re.sub(r"\s+", " ", comment.body.lower()).strip()  # normalize spaces and lowercase
+
     for code, answer in faq_answers.items():
-        # build regex pattern to match with or without brackets, case-insensitive
-        raw_code = code.strip("[]")  # remove brackets like [FAQ001] → FAQ001
+        # match FAQ codes with or without brackets
+        raw_code = code.strip("[]")
         pattern = rf"(\[?\b{re.escape(raw_code)}\b\]?)"
         if re.search(pattern, body, re.IGNORECASE):
             try:
-                comment.reply(answer)
+                # Build footer with subreddit link
+                wiki_url = f"https://www.reddit.com/r/{subreddit_name}/wiki/ifaq"
+                footer = f"\n\n---\n^(This answer was automatically pulled from [Our Wiki FAQ]({wiki_url}).)"
+                
+                comment.reply(answer + footer)
                 replied_comments.add(comment.id)
                 print(f"💬 Replied to u/{comment.author} with code {code}", flush=True)
             except Exception as e:
@@ -115,6 +120,7 @@ def handle_comment(comment):
                 traceback.print_exc()
             return True
     return False
+
 
 # -------------------------
 # Main loop
