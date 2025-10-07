@@ -102,11 +102,14 @@ replied_comments = set()
 def handle_comment(comment):
     body = re.sub(r"\s+", " ", comment.body.lower()).strip()  # normalize spaces and lowercase
     for code, answer in faq_answers.items():
-        if re.search(rf"\b{re.escape(code)}\b", body):
+        # build regex pattern to match with or without brackets, case-insensitive
+        raw_code = code.strip("[]")  # remove brackets like [FAQ001] → FAQ001
+        pattern = rf"(\[?\b{re.escape(raw_code)}\b\]?)"
+        if re.search(pattern, body, re.IGNORECASE):
             try:
                 comment.reply(answer)
                 replied_comments.add(comment.id)
-                print(f"💬 Replied to u/{comment.author} with {code}", flush=True)
+                print(f"💬 Replied to u/{comment.author} with code {code}", flush=True)
             except Exception as e:
                 print(f"⚠️ Error replying to comment {comment.id}: {e}", flush=True)
                 traceback.print_exc()
