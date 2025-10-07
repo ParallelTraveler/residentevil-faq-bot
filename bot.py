@@ -84,10 +84,11 @@ def load_faq():
         return {}
 
     faq = {}
-    # Parse codes and answers, store codes lowercase
-    matches = re.findall(r"(\[FAQ\d+\])\s*\n(.+?)(?=\n\[FAQ|\Z)", page, re.S)
-    for code, answer in matches:
-        faq[code.strip().lower()] = answer.strip()
+    # improved regex — ignores headings and stops at the next heading or FAQ code
+    matches = re.findall(r"\[FAQ(\d+)\]\s*\n(.*?)(?=(?:\n#+ |\n\[FAQ|\Z))", page, re.S)
+    for num, answer in matches:
+        code = f"[FAQ{num}]".lower()
+        faq[code] = answer.strip()
     print(f"📖 Parsed {len(faq)} FAQ entries.", flush=True)
     return faq
 
