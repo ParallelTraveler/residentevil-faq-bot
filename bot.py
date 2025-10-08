@@ -4,25 +4,53 @@ import re
 import time
 import threading
 import logging
-import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from logging.handlers import RotatingFileHandler
 
-# ------------------ Logging ------------------
+# ============================================================
+# LOGGING SETUP
+# ============================================================
 LOG_PATH = "bot.log"
-handler = RotatingFileHandler(LOG_PATH, maxBytes=5 * 1024 * 1024, backupCount=3)
+
+# File handler (keeps detailed logs locally)
+file_handler = RotatingFileHandler(LOG_PATH, maxBytes=5 * 1024 * 1024, backupCount=3)
+file_handler.setLevel(logging.DEBUG)
+
+# Define filter to reduce Render console spam
+class RenderLogFilter(logging.Filter):
+    """Filter to reduce repetitive or noisy logs on Render."""
+    def filter(self, record):
+        msg = record.getMessage()
+        # Skip repetitive info messages (tune as needed)
+        if "Replied to" in msg or "Loaded" in msg or "Stream error" in msg:
+            # Only keep ~1 of every 50 similar logs
+            return hash(msg) % 50 == 0
+        return True
+
+# Console handler for Render output
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+console_handler.addFilter(RenderLogFilter())
+
 logging.basicConfig(
-    level=logging.INFO,
-    handlers=[handler],
+    level=logging.DEBUG,
+    handlers=[file_handler, console_handler],
     format="%(asctime)s [%(levelname)s] %(message)s"
 )
+
 logger = logging.getLogger(__name__)
 
-# Prevent stdout/stderr from flooding Render logs (fixes “output too large”)
-sys.stdout = open(os.devnull, "w")
-sys.stderr = sys.stdout
+# Trim oversized local log file if needed
+try:
+    if os.path.exists(LOG_PATH) and os.path.getsize(LOG_PATH) > 5 * 1024 * 1024:
+        open(LOG_PATH, "w").close()
+        logger.info("Trimmed oversized log file on startup.")
+except Exception as e:
+    logger.warning(f"Could not trim log file: {e}")
 
-# ------------------ Reddit Auth ------------------
+# ============================================================
+# REDDIT AUTH
+# ============================================================
 reddit = praw.Reddit(
     client_id=os.getenv("REDDIT_CLIENT_ID"),
     client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
@@ -34,7 +62,9 @@ reddit = praw.Reddit(
 subreddit = reddit.subreddit("residentevil")   # change if needed
 WIKI_PAGE = "ifaq"
 
-# ------------------ FAQ Loader ------------------
+# ============================================================
+# FAQ LOADER
+# ============================================================
 faq_dict = {}
 
 def load_faq():
@@ -45,7 +75,6 @@ def load_faq():
         # Pattern: [FAQ001]\nAnswer text until next [FAQ...]
         pattern = r"\[FAQ(\d{3})\]\s*(.+?)(?=\n\[FAQ|\Z)"
         matches = re.findall(pattern, page, flags=re.DOTALL)
-
         faq_dict = {f"[FAQ{num}]": ans.strip() for num, ans in matches}
         logger.info(f"Loaded {len(faq_dict)} FAQ entries from wiki '{WIKI_PAGE}'.")
     except Exception as e:
@@ -57,7 +86,9 @@ def refresh_faq_periodically():
         load_faq()
         time.sleep(600)
 
-# ------------------ Bot Core ------------------
+# ============================================================
+# BOT CORE
+# ============================================================
 def run_bot():
     """Main comment stream handler."""
     logger.info("Bot started successfully and monitoring comments.")
@@ -84,7 +115,9 @@ def run_bot():
             logger.error(f"Stream error: {stream_error}", exc_info=True)
             time.sleep(60)
 
-# ------------------ Dummy Keep-Alive Server ------------------
+# ============================================================
+# KEEP-ALIVE HTTP SERVER
+# ============================================================
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
@@ -93,10 +126,13 @@ class HealthHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b"OK")
         except Exception:
-            # Always return a small OK to avoid any error output
+            # Always return OK to avoid crashing on probe disconnects
             self.send_response(200)
             self.end_headers()
-            self.wfile.write(b"OK")
+            try:
+                self.wfile.write(b"OK")
+            except:
+                pass
 
     def do_HEAD(self):
         try:
@@ -118,12 +154,11 @@ def start_server():
         time.sleep(10)
         start_server()
 
-# ------------------ Threading ------------------
+# ============================================================
+# THREADING & MAIN
+# ============================================================
 if __name__ == "__main__":
-    # Load FAQ immediately and start background refresh
     load_faq()
     threading.Thread(target=refresh_faq_periodically, daemon=True).start()
-
-    # Start Reddit bot and HTTP server
     threading.Thread(target=run_bot, daemon=True).start()
     start_server()
