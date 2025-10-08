@@ -1,160 +1,104 @@
+import praw
 import os
+import re
 import time
 import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import praw
-import prawcore
-import traceback
-import re
+import logging
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from logging.handlers import RotatingFileHandler
 
-# -------------------------
-# Tiny HTTP server (Cron-job / uptime-friendly)
-# -------------------------
-class DummyHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-Type", "text/plain")
-        self.end_headers()
-        self.wfile.write(b"OK")  # minimal response
+# ------------------ Logging ------------------
+LOG_PATH = "bot.log"
+handler = RotatingFileHandler(LOG_PATH, maxBytes=5 * 1024 * 1024, backupCount=3)
+logging.basicConfig(
+    level=logging.INFO,
+    handlers=[handler],
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
+logger = logging.getLogger(__name__)
 
-def start_http_server():
-    port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(("0.0.0.0", port), DummyHandler)
-    server.serve_forever()
-
-threading.Thread(target=start_http_server, daemon=True).start()
-print(f"🌐 Minimal web server running on port {os.environ.get('PORT', 10000)}", flush=True)
-
-# -------------------------
-# Startup
-# -------------------------
-print("🚀 bot.py started...", flush=True)
-
-# -------------------------
-# Environment check
-# -------------------------
-required_vars = [
-    "REDDIT_CLIENT_ID",
-    "REDDIT_CLIENT_SECRET",
-    "REDDIT_USERNAME",
-    "REDDIT_PASSWORD",
-    "REDDIT_USER_AGENT",
-    "SUBREDDIT",
-]
-
-missing = [v for v in required_vars if v not in os.environ or not os.environ[v]]
-if missing:
-    raise EnvironmentError(f"❌ Missing environment variables: {', '.join(missing)}")
-else:
-    print("✅ All required environment variables found.", flush=True)
-
-# -------------------------
-# Reddit setup
-# -------------------------
+# ------------------ Reddit Auth ------------------
 reddit = praw.Reddit(
-    client_id=os.environ["REDDIT_CLIENT_ID"],
-    client_secret=os.environ["REDDIT_CLIENT_SECRET"],
-    username=os.environ["REDDIT_USERNAME"],
-    password=os.environ["REDDIT_PASSWORD"],
-    user_agent=os.environ["REDDIT_USER_AGENT"],
+    client_id=os.getenv("REDDIT_CLIENT_ID"),
+    client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
+    username=os.getenv("REDDIT_USERNAME"),
+    password=os.getenv("REDDIT_PASSWORD"),
+    user_agent=os.getenv("REDDIT_USER_AGENT", "residentevil-faq-bot")
 )
 
-subreddit_name = os.environ["SUBREDDIT"]
-subreddit = reddit.subreddit(subreddit_name)
+subreddit = reddit.subreddit("residentevil")   # change if needed
+WIKI_PAGE = "ifaq"
 
-bot_username = str(reddit.user.me()).lower()
-print(f"✅ Logged in as: {reddit.user.me()}", flush=True)
-print(f"📍 Target subreddit: r/{subreddit_name}", flush=True)
+# ------------------ FAQ Loader ------------------
+faq_dict = {}
 
-# -------------------------
-# Load FAQ from wiki
-# -------------------------
 def load_faq():
-    wiki_page_name = "ifaq"  # confirmed readable page
-    print(f"📘 Checking wiki page '{wiki_page_name}'...", flush=True)
+    """Pulls and parses the FAQ wiki page into a dict."""
+    global faq_dict
     try:
-        page = subreddit.wiki[wiki_page_name].content_md
-        print(f"✅ Loaded '{wiki_page_name}' page successfully ({len(page)} characters).", flush=True)
-    except prawcore.exceptions.NotFound:
-        print(f"❌ Could not find the '{wiki_page_name}' wiki page.", flush=True)
-        return {}
+        page = subreddit.wiki[WIKI_PAGE].content_md
+        # Pattern: [FAQ001]\nAnswer text until next [FAQ...]
+        pattern = r"\[FAQ(\d{3})\]\s*(.+?)(?=\n\[FAQ|\Z)"
+        matches = re.findall(pattern, page, flags=re.DOTALL)
+
+        faq_dict = {f"[FAQ{num}]": ans.strip() for num, ans in matches}
+        logger.info(f"Loaded {len(faq_dict)} FAQ entries from wiki '{WIKI_PAGE}'.")
     except Exception as e:
-        print(f"❌ Error loading wiki: {e}", flush=True)
-        traceback.print_exc()
-        return {}
+        logger.error(f"Failed to load FAQ from wiki: {e}", exc_info=True)
 
-    faq = {}
-    # improved regex — ignores headings and stops at the next heading or FAQ code
-    matches = re.findall(r"\[FAQ(\d+)\]\s*\n(.*?)(?=(?:\n#+ |\n\[FAQ|\Z))", page, re.S)
-    for num, answer in matches:
-        code = f"[FAQ{num}]".lower()
-        faq[code] = answer.strip()
-    print(f"📖 Parsed {len(faq)} FAQ entries.", flush=True)
-    return faq
+def refresh_faq_periodically():
+    """Reloads the FAQ every 10 minutes."""
+    while True:
+        load_faq()
+        time.sleep(600)
 
-faq_answers = load_faq()
-last_reload = time.time()
-reload_interval = 600  # 10 minutes
-replied_comments = set()
-
-# -------------------------
-# Handle comment replies
-# -------------------------
-def handle_comment(comment):
-    body = re.sub(r"\s+", " ", comment.body.lower()).strip()  # normalize spaces and lowercase
-
-    for code, answer in faq_answers.items():
-        # match FAQ codes with or without brackets
-        raw_code = code.strip("[]")
-        pattern = rf"(\[?\b{re.escape(raw_code)}\b\]?)"
-        if re.search(pattern, body, re.IGNORECASE):
-            try:
-                # Build footer with subreddit link
-                wiki_url = f"https://www.reddit.com/r/{subreddit_name}/wiki/ifaq"
-                footer = f"\n\n---\n^(This answer was automatically pulled from [Our Wiki FAQ]({wiki_url}).)"
-                
-                comment.reply(answer + footer)
-                replied_comments.add(comment.id)
-                print(f"💬 Replied to u/{comment.author} with code {code}", flush=True)
-            except Exception as e:
-                print(f"⚠️ Error replying to comment {comment.id}: {e}", flush=True)
-                traceback.print_exc()
-            return True
-    return False
-
-
-# -------------------------
-# Main loop
-# -------------------------
-def main():
-    print("🔍 Monitoring subreddit comments...", flush=True)
-
+# ------------------ Bot Core ------------------
+def run_bot():
+    """Main comment stream handler."""
+    logger.info("Bot started successfully and monitoring comments.")
     while True:
         try:
             for comment in subreddit.stream.comments(skip_existing=True):
-                author_name = comment.author.name if comment.author else "[deleted]"
-                print(f"👀 Seen comment {comment.id} by {author_name}", flush=True)
-
-                # Skip own comments
-                if comment.author and comment.author.name.lower() == bot_username:
+                body = comment.body.strip()
+                match = re.search(r"\[FAQ\d{3}\]", body, flags=re.IGNORECASE)
+                if not match:
                     continue
 
-                # Reload FAQ periodically
-                if time.time() - last_reload > reload_interval:
-                    print("🔄 Reloading FAQ from wiki...", flush=True)
-                    globals()["faq_answers"] = load_faq()
-                    globals()["last_reload"] = time.time()
+                code = match.group(0).upper()
+                if code in faq_dict:
+                    answer = faq_dict[code]
+                    footer = "\n\n---\n^(Answer pulled from the [Resident Evil FAQ Wiki](https://www.reddit.com/r/residentevil/wiki/ifaq))"
+                    reply_text = f"{answer}{footer}"
 
-                if comment.id not in replied_comments:
-                    matched = handle_comment(comment)
-                    if not matched:
-                        print(f"⚡ No FAQ code found in comment {comment.id}", flush=True)
+                    try:
+                        comment.reply(reply_text)
+                        logger.info(f"Replied to {comment.id} with {code}.")
+                    except Exception as reply_error:
+                        logger.error(f"Error replying to {comment.id}: {reply_error}", exc_info=True)
+        except Exception as stream_error:
+            logger.error(f"Stream error: {stream_error}", exc_info=True)
+            time.sleep(60)
 
-                time.sleep(2)
-        except Exception as e:
-            print(f"⚠️ Stream error: {e}", flush=True)
-            traceback.print_exc()
-            time.sleep(30)
+# ------------------ Dummy Keep-Alive Server ------------------
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"OK")
 
+def start_server():
+    port = int(os.getenv("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+    logger.info(f"Keep-alive server running on port {port}")
+    server.serve_forever()
+
+# ------------------ Threading ------------------
 if __name__ == "__main__":
-    main()
+    # Load FAQ immediately and start background refresh
+    load_faq()
+    threading.Thread(target=refresh_faq_periodically, daemon=True).start()
+
+    # Start Reddit bot and HTTP server
+    threading.Thread(target=run_bot, daemon=True).start()
+    start_server()
