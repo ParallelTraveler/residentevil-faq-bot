@@ -4,6 +4,7 @@ import re
 import time
 import threading
 import logging
+import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from logging.handlers import RotatingFileHandler
 
@@ -16,6 +17,10 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+# Prevent stdout/stderr from flooding Render logs (fixes “output too large”)
+sys.stdout = open(os.devnull, "w")
+sys.stderr = sys.stdout
 
 # ------------------ Reddit Auth ------------------
 reddit = praw.Reddit(
@@ -82,16 +87,36 @@ def run_bot():
 # ------------------ Dummy Keep-Alive Server ------------------
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain")
-        self.end_headers()
-        self.wfile.write(b"OK")
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"OK")
+        except Exception:
+            # Always return a small OK to avoid any error output
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"OK")
+
+    def do_HEAD(self):
+        try:
+            self.send_response(200)
+            self.end_headers()
+        except Exception:
+            self.send_response(200)
+            self.end_headers()
 
 def start_server():
+    """Runs the minimal keep-alive HTTP server."""
     port = int(os.getenv("PORT", 10000))
     server = HTTPServer(("0.0.0.0", port), HealthHandler)
-    logger.info(f"Keep-alive server running on port {port}")
-    server.serve_forever()
+    logger.info(f"Health server running on port {port}")
+    try:
+        server.serve_forever()
+    except Exception as e:
+        logger.error(f"HTTP server error: {e}", exc_info=True)
+        time.sleep(10)
+        start_server()
 
 # ------------------ Threading ------------------
 if __name__ == "__main__":
