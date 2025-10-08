@@ -6,28 +6,24 @@ import threading
 import logging
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from logging.handlers import RotatingFileHandler
+from prawcore.exceptions import RequestException, ResponseException, ServerError
 
 # ============================================================
 # LOGGING SETUP
 # ============================================================
 LOG_PATH = "bot.log"
 
-# File handler (keeps detailed logs locally)
 file_handler = RotatingFileHandler(LOG_PATH, maxBytes=5 * 1024 * 1024, backupCount=3)
 file_handler.setLevel(logging.DEBUG)
 
-# Define filter to reduce Render console spam
 class RenderLogFilter(logging.Filter):
-    """Filter to reduce repetitive or noisy logs on Render."""
+    """Reduce repetitive logs in Render console."""
     def filter(self, record):
         msg = record.getMessage()
-        # Skip repetitive info messages (tune as needed)
-        if "Replied to" in msg or "Loaded" in msg or "Stream error" in msg:
-            # Only keep ~1 of every 50 similar logs
-            return hash(msg) % 50 == 0
+        if any(kw in msg for kw in ("Replied to", "Loaded", "Stream error", "Retrying")):
+            return hash(msg) % 40 == 0  # throttle repetitive logs
         return True
 
-# Console handler for Render output
 console_handler = logging.StreamHandler()
 console_handler.setLevel(logging.INFO)
 console_handler.addFilter(RenderLogFilter())
@@ -40,7 +36,6 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# Trim oversized local log file if needed
 try:
     if os.path.exists(LOG_PATH) and os.path.getsize(LOG_PATH) > 5 * 1024 * 1024:
         open(LOG_PATH, "w").close()
@@ -59,26 +54,35 @@ reddit = praw.Reddit(
     user_agent=os.getenv("REDDIT_USER_AGENT", "residentevil-faq-bot")
 )
 
-subreddit = reddit.subreddit("residentevil")   # change if needed
+subreddit = reddit.subreddit("residentevil")
 WIKI_PAGE = "ifaq"
 
 # ============================================================
-# FAQ LOADER
+# FAQ LOADER (with retry)
 # ============================================================
 faq_dict = {}
 
 def load_faq():
-    """Pulls and parses the FAQ wiki page into a dict."""
+    """Pulls and parses the FAQ wiki page into a dict, with retry on network errors."""
     global faq_dict
-    try:
-        page = subreddit.wiki[WIKI_PAGE].content_md
-        # Pattern: [FAQ001]\nAnswer text until next [FAQ...]
-        pattern = r"\[FAQ(\d{3})\]\s*(.+?)(?=\n\[FAQ|\Z)"
-        matches = re.findall(pattern, page, flags=re.DOTALL)
-        faq_dict = {f"[FAQ{num}]": ans.strip() for num, ans in matches}
-        logger.info(f"Loaded {len(faq_dict)} FAQ entries from wiki '{WIKI_PAGE}'.")
-    except Exception as e:
-        logger.error(f"Failed to load FAQ from wiki: {e}", exc_info=True)
+    retries = 0
+    while retries < 5:
+        try:
+            page = subreddit.wiki[WIKI_PAGE].content_md
+            pattern = r"\[FAQ(\d{3})\]\s*(.+?)(?=\n\[FAQ|\Z)"
+            matches = re.findall(pattern, page, flags=re.DOTALL)
+            faq_dict = {f"[FAQ{num}]": ans.strip() for num, ans in matches}
+            logger.info(f"Loaded {len(faq_dict)} FAQ entries from wiki '{WIKI_PAGE}'.")
+            return
+        except (RequestException, ResponseException, ServerError) as e:
+            wait = (2 ** retries) + 3
+            logger.warning(f"Retrying wiki load (attempt {retries+1}/5): {e}")
+            time.sleep(wait)
+            retries += 1
+        except Exception as e:
+            logger.error(f"Failed to load FAQ: {e}", exc_info=True)
+            break
+    logger.error("Exceeded max retries for loading FAQ; keeping last known data.")
 
 def refresh_faq_periodically():
     """Reloads the FAQ every 10 minutes."""
@@ -87,11 +91,13 @@ def refresh_faq_periodically():
         time.sleep(600)
 
 # ============================================================
-# BOT CORE
+# BOT CORE (with retry & backoff)
 # ============================================================
 def run_bot():
-    """Main comment stream handler."""
+    """Main comment stream handler with retry logic."""
     logger.info("Bot started successfully and monitoring comments.")
+    backoff = 10
+
     while True:
         try:
             for comment in subreddit.stream.comments(skip_existing=True):
@@ -111,9 +117,17 @@ def run_bot():
                         logger.info(f"Replied to {comment.id} with {code}.")
                     except Exception as reply_error:
                         logger.error(f"Error replying to {comment.id}: {reply_error}", exc_info=True)
-        except Exception as stream_error:
-            logger.error(f"Stream error: {stream_error}", exc_info=True)
-            time.sleep(60)
+            # reset backoff after success
+            backoff = 10
+
+        except (RequestException, ResponseException, ServerError) as stream_error:
+            logger.warning(f"Reddit connection issue: {stream_error}. Retrying in {backoff}s.")
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 300)  # exponential backoff, max 5 min
+        except Exception as e:
+            logger.error(f"Stream error: {e}", exc_info=True)
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 300)
 
 # ============================================================
 # KEEP-ALIVE HTTP SERVER
@@ -126,7 +140,6 @@ class HealthHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b"OK")
         except Exception:
-            # Always return OK to avoid crashing on probe disconnects
             self.send_response(200)
             self.end_headers()
             try:
