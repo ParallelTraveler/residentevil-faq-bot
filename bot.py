@@ -46,15 +46,22 @@ except Exception as e:
 # ============================================================
 # REDDIT AUTH
 # ============================================================
-reddit = praw.Reddit(
-    client_id=os.getenv("REDDIT_CLIENT_ID"),
-    client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
-    username=os.getenv("REDDIT_USERNAME"),
-    password=os.getenv("REDDIT_PASSWORD"),
-    user_agent=os.getenv("REDDIT_USER_AGENT", "residentevil-faq-bot")
-)
+logger.info("Initializing Reddit client...")
+try:
+    reddit = praw.Reddit(
+        client_id=os.getenv("REDDIT_CLIENT_ID"),
+        client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
+        username=os.getenv("REDDIT_USERNAME"),
+        password=os.getenv("REDDIT_PASSWORD"),
+        user_agent=os.getenv("REDDIT_USER_AGENT", "residentevil-faq-bot")
+    )
+    logger.info("Reddit client initialized successfully.")
+    subreddit = reddit.subreddit("residentevil")
+    logger.info("Connected to subreddit: residentevil")
+except Exception as e:
+    logger.critical(f"Failed to initialize Reddit client: {e}", exc_info=True)
+    raise SystemExit(1)
 
-subreddit = reddit.subreddit("residentevil")
 WIKI_PAGE = "ifaq"
 
 # ============================================================
@@ -68,6 +75,7 @@ def load_faq():
     retries = 0
     while retries < 5:
         try:
+            logger.debug("Attempting to fetch FAQ wiki page...")
             page = subreddit.wiki[WIKI_PAGE].content_md
             pattern = r"\[FAQ(\d{3})\]\s*(.+?)(?=\n\[FAQ|\Z)"
             matches = re.findall(pattern, page, flags=re.DOTALL)
@@ -95,7 +103,7 @@ def refresh_faq_periodically():
 # ============================================================
 def run_bot():
     """Main comment stream handler with retry logic."""
-    logger.info("Bot started successfully and monitoring comments.")
+    logger.info("Bot thread started. Monitoring new comments...")
     backoff = 10
 
     while True:
@@ -114,16 +122,16 @@ def run_bot():
 
                     try:
                         comment.reply(reply_text)
-                        logger.info(f"Replied to {comment.id} with {code}.")
+                        logger.info(f"Replied to comment {comment.id} with {code}.")
                     except Exception as reply_error:
                         logger.error(f"Error replying to {comment.id}: {reply_error}", exc_info=True)
-            # reset backoff after success
-            backoff = 10
+
+            backoff = 10  # reset after success
 
         except (RequestException, ResponseException, ServerError) as stream_error:
             logger.warning(f"Reddit connection issue: {stream_error}. Retrying in {backoff}s.")
             time.sleep(backoff)
-            backoff = min(backoff * 2, 300)  # exponential backoff, max 5 min
+            backoff = min(backoff * 2, 300)
         except Exception as e:
             logger.error(f"Stream error: {e}", exc_info=True)
             time.sleep(backoff)
@@ -170,6 +178,11 @@ def start_server():
 # ============================================================
 # THREADING & MAIN
 # ============================================================
+def global_thread_excepthook(args):
+    logger.error(f"Uncaught thread exception: {args.exc_type.__name__}: {args.exc_value}", exc_info=True)
+
+threading.excepthook = global_thread_excepthook
+
 if __name__ == "__main__":
     load_faq()
     threading.Thread(target=refresh_faq_periodically, daemon=True).start()
